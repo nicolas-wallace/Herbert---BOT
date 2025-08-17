@@ -1,2 +1,9 @@
 [phases.setup]
 python_version = "3.13"
+
+[phases.install]
+packages = ["ffmpeg"]  # instala ffmpeg no ambiente
+extra = "pip install -r requirements.txt"
+
+[phases.start]
+cmd = "python bot.py"  # substitua bot.py pelo nome do seu arquivo
