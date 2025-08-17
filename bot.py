@@ -5,6 +5,13 @@ from discord.ext import commands
 import yt_dlp
 import asyncio
 
+cookies_content = os.environ.get("YOUTUBE_COOKIES")
+if cookies_content:
+    with open("cookies.txt", "w", encoding="utf-8") as f:
+        f.write(cookies_content)
+else:
+    print("A variável de ambiente YOUTUBE_COOKIES não está definida!")
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -18,7 +25,8 @@ ydl_opts = {
     'no_warnings': True,
     'ignoreerrors': True,
     'nocheckcertificate': True,
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
+    'cookiefile': 'cookies.txt'  # caminho para o seu arquivo de cookies
 }
 
 ffmpeg_opts = {
