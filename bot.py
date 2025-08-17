@@ -5,23 +5,25 @@ from discord.ext import commands
 import yt_dlp
 import asyncio
 
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
-load_dotenv()
 
-# Configurações do youtube-dl
+# Configurações do yt_dlp
 ydl_opts = {
     'format': 'bestaudio/best',
     'quiet': True,
     'no_warnings': True,
     'ignoreerrors': True,
     'nocheckcertificate': True,
-    'source_address': '0.0.0.0'  # IPv4 apenas
+    'source_address': '0.0.0.0'
 }
 
 ffmpeg_opts = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -loglevel 0',
-    'options': '-vn -af "volume=0.5"'  # Reduzindo um pouco o volume para evitar distorções
+    'options': '-vn -af "volume=0.5"'
 }
 
 async def get_info(url):
@@ -31,14 +33,9 @@ async def get_info(url):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    # Apenas logando desconexões do bot
     if member.id == bot.user.id and after.channel is None:
-        # Bot foi desconectado, tenta reconectar
-        if before.channel:
-            try:
-                await asyncio.sleep(1)
-                await before.channel.connect()
-            except Exception:
-                pass
+        print(f"Bot desconectado do canal {before.channel}")
 
 @bot.command()
 async def play(ctx, url: str):
@@ -52,30 +49,33 @@ async def play(ctx, url: str):
     try:
         # Conecta no canal se não estiver conectado
         if not voice_client:
-            voice_client = await channel.connect(timeout=30, reconnect=True)
+            voice_client = await channel.connect(timeout=30)
         elif voice_client.channel != channel:
             await voice_client.move_to(channel)
 
         info = await get_info(url)
-
         if not info:
             await ctx.send("Não foi possível extrair informações do vídeo.")
             return
 
-        # Se for playlist, pega o primeiro vídeo
+        # Se for playlist, pega o primeiro vídeo válido
         if 'entries' in info and len(info['entries']) > 0:
-            info = info['entries'][0]
+            for entry in info['entries']:
+                if entry:  # Ignora vídeos inválidos
+                    info = entry
+                    break
 
         # Pega a melhor URL de áudio
+        stream_url = None
         if 'url' in info:
             stream_url = info['url']
         elif 'formats' in info:
-            stream_url = next(f['url'] for f in info['formats'] if f.get('acodec') != 'none')
-        else:
+            stream_url = next((f['url'] for f in info['formats'] if f.get('acodec') != 'none'), None)
+
+        if not stream_url:
             await ctx.send("Não foi possível extrair a URL de áudio.")
             return
 
-        # Cria a fonte de áudio
         source = discord.FFmpegPCMAudio(
             stream_url,
             before_options=ffmpeg_opts['before_options'],
@@ -93,7 +93,7 @@ async def play(ctx, url: str):
 
 @bot.command()
 async def leave(ctx):
-    """Comando para desconectar o bot do canal de voz"""
+    """Desconecta o bot do canal de voz"""
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("👋 Desconectado do canal de voz!")
@@ -107,7 +107,7 @@ async def pause(ctx):
 
 @bot.command()
 async def resume(ctx):
-    """Continua tocando a música pausada"""
+    """Continua a música pausada"""
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
         await ctx.send("▶️ Música continuando!")
@@ -119,5 +119,4 @@ async def stop(ctx):
         ctx.voice_client.stop()
         await ctx.send("⏹️ Música parada!")
 
-bot.run(os.getenv("DISCORD_TOKEN"))
-print("TOKEN CARREGADO:", os.getenv("DISCORD_TOKEN"))
+bot.run(TOKEN)
