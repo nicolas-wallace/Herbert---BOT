@@ -5,18 +5,15 @@ from discord.ext import commands
 import yt_dlp
 import asyncio
 
-cookies_content = os.environ.get("YOUTUBE_COOKIES")
-if cookies_content:
-    with open("cookies.txt", "w", encoding="utf-8") as f:
-        f.write(cookies_content)
-else:
-    print("A variável de ambiente YOUTUBE_COOKIES não está definida!")
-
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='h!', intents=intents)
+
+# Variáveis para controlar o loop de música
+loop_states = {}  # Dicionário para armazenar o estado de loop por servidor
+current_songs = {}  # Dicionário para armazenar a música atual por servidor
 
 # Configurações do yt_dlp
 ydl_opts = {
@@ -26,7 +23,7 @@ ydl_opts = {
     'ignoreerrors': True,
     'nocheckcertificate': True,
     'source_address': '0.0.0.0',
-    'cookiefile': 'cookies.txt'  # caminho para o seu arquivo de cookies
+    'cookiefile': 'cookies.txt'
 }
 
 ffmpeg_opts = {
@@ -84,17 +81,33 @@ async def play(ctx, url: str):
             await ctx.send("Não foi possível extrair a URL de áudio.")
             return
 
-        source = discord.FFmpegPCMAudio(
-            stream_url,
-            before_options=ffmpeg_opts['before_options'],
-            options=ffmpeg_opts['options']
-        )
+        # Salva informações da música atual
+        current_songs[ctx.guild.id] = {
+            'url': url,
+            'title': info.get('title', 'Desconhecido'),
+            'stream_url': stream_url
+        }
 
+        def play_next(_):
+            if ctx.guild.id in loop_states and loop_states[ctx.guild.id]:
+                # Se o loop está ativado, toca a mesma música novamente
+                asyncio.run_coroutine_threadsafe(play_song(ctx, stream_url, info.get('title', 'Desconhecido')), bot.loop)
+
+        async def play_song(ctx, stream_url, title):
+            if ctx.voice_client:
+                source = discord.FFmpegPCMAudio(
+                    stream_url,
+                    before_options=ffmpeg_opts['before_options'],
+                    options=ffmpeg_opts['options']
+                )
+                ctx.voice_client.play(source, after=play_next)
+                await ctx.send(f"🔄 Tocando: {title}")
+
+        # Inicia a reprodução
         if voice_client.is_playing():
             voice_client.stop()
 
-        voice_client.play(source)
-        await ctx.send(f"Tocando: {info.get('title', 'Desconhecido')}")
+        await play_song(ctx, stream_url, info.get('title', 'Desconhecido'))
 
     except Exception as e:
         await ctx.send(f"Ocorreu um erro: {e}")
@@ -126,5 +139,83 @@ async def stop(ctx):
     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
         ctx.voice_client.stop()
         await ctx.send("⏹️ Música parada!")
+
+@bot.command()
+async def repeat(ctx, mode: str = None):
+    """Controla o modo de repetição da música
+    Uso: 
+    !repeat on - Ativa o modo de repetição
+    !repeat off - Desativa o modo de repetição
+    !repeat status - Mostra o status atual do modo de repetição"""
+    
+    if mode is None or mode.lower() not in ['on', 'off', 'status']:
+        await ctx.send("❌ Use `!repeat on`, `!repeat off` ou `!repeat status`")
+        return
+
+    if mode.lower() == 'status':
+        status = loop_states.get(ctx.guild.id, False)
+        await ctx.send(f"🔄 Modo de repetição está: {'**ATIVADO**' if status else '**DESATIVADO**'}")
+        return
+
+    loop_states[ctx.guild.id] = mode.lower() == 'on'
+    await ctx.send(f"🔄 Modo de repetição {'**ATIVADO**' if mode.lower() == 'on' else '**DESATIVADO**'}")
+
+@bot.command()
+async def current(ctx):
+    """Mostra informações sobre a música atual"""
+    if ctx.guild.id in current_songs:
+        song = current_songs[ctx.guild.id]
+        status = "🔄 (Loop Ativado)" if loop_states.get(ctx.guild.id, False) else ""
+        await ctx.send(f"🎵 Tocando: {song['title']} {status}")
+    else:
+        await ctx.send("❌ Nenhuma música está tocando no momento.")
+
+@bot.command()
+async def command(ctx):
+    """Mostra todos os comandos disponíveis"""
+    embed = discord.Embed(
+        title="🎵 Comandos do Bot de Música",
+        description="Aqui está a lista de todos os comandos disponíveis:",
+        color=discord.Color.blue()
+    )
+
+    # Comandos de Reprodução
+    embed.add_field(
+        name="📱 Comandos de Reprodução",
+        value=(
+            "`h!play <url>` - Toca uma música do YouTube\n"
+            "`h!pause` - Pausa a música atual\n"
+            "`h!resume` - Continua a música pausada\n"
+            "`h!stop` - Para a música atual\n"
+        ),
+        inline=False
+    )
+
+    # Comandos de Controle
+    embed.add_field(
+        name="⚙️ Comandos de Controle",
+        value=(
+            "`h!repeat on` - Ativa o modo de repetição\n"
+            "`h!repeat off` - Desativa o modo de repetição\n"
+            "`h!repeat status` - Mostra o status do modo de repetição\n"
+            "`h!current` - Mostra a música atual\n"
+            "`h!leave` - Desconecta o bot do canal de voz\n"
+        ),
+        inline=False
+    )
+
+    # Informações adicionais
+    embed.add_field(
+        name="ℹ️ Informações",
+        value=(
+            "`h!command` - Mostra esta mensagem\n"
+        ),
+        inline=False
+    )
+
+    # Rodapé
+    embed.set_footer(text="Use h! antes de cada comando • Bot desenvolvido por Nicolas")
+
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
